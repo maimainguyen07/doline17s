@@ -8,11 +8,18 @@
 #define PIN_MUX_S2         19
 #define PIN_MUX_S3         23
 #define PIN_CALIB_BUTTON   34
-#define PIN_START_BUTTON   35  // Reserved; the current firmware does not use it yet.
+#define PIN_START_BUTTON   35
+
+// Mức logic khi bấm nút:
+// - HIGH: nếu dùng trở 10k kéo xuống GND (nút nhấn nối 3.3V, bấm là HIGH)
+// - LOW:  nếu dùng trở 10k kéo lên 3.3V (nút nhấn nối GND, bấm là LOW)
+#ifndef BUTTON_PRESSED_STATE
+#define BUTTON_PRESSED_STATE LOW
+#endif
 
 // Quadrature channels A/B per wheel, inherited from mainv2.
-#define PIN_ENCODER_L1     21
-#define PIN_ENCODER_L2     22
+#define PIN_ENCODER_L1     22
+#define PIN_ENCODER_L2     21
 #define PIN_ENCODER_R1     32
 #define PIN_ENCODER_R2     33
 // Forward motion should increase both signed encoder counts.

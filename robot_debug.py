@@ -839,6 +839,17 @@ class App(tk.Tk):
             self.set_auto_running(True)
             self.control_state.set("ĐANG DÒ LINE — PID AUTO đang chạy.")
             self.control_state_label.configure(fg=GREEN)
+            if self.run_csv.active is None and self.calibration_ok and all(v is not None for v in self.cal_thresholds):
+                try:
+                    calib = (self.cal_min, self.cal_max)
+                    recorder = self.run_csv.begin(
+                        self.reader, CSV_HEADER, calib, list(self.cal_thresholds))
+                    self.last_csv_total = 0
+                    self.stop_ack_deadline = None
+                    self.csv_status.set(f"CSV GHI: {recorder.path.name}")
+                    self.log(f"CSV BẮT ĐẦU (từ nút xe): {recorder.path}")
+                except Exception as exc:
+                    self.log(f"Không thể mở CSV từ nút xe: {exc}")
             self.update_control_buttons()
         elif message.startswith("ERR: CALIB_REQUIRED_OR_PENDING"):
             self.start_pending = False

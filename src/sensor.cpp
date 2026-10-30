@@ -31,7 +31,8 @@ uint32_t sums[N_SENSORS] = {};
 uint64_t squares[N_SENSORS] = {};
 uint16_t whiteStage[N_SENSORS] = {}, whiteNoise[N_SENSORS] = {};
 uint32_t frames = 0;
-int lastButtonRead = LOW, buttonState = LOW;
+int lastButtonRead = (BUTTON_PRESSED_STATE == HIGH ? LOW : HIGH);
+int buttonState = (BUTTON_PRESSED_STATE == HIGH ? LOW : HIGH);
 unsigned long lastButtonChange = 0;
 
 // Fastest of nine hardware-tested modes: IDF_GPIO/1. Keep the original
@@ -260,7 +261,7 @@ bool sensor_is_button_pressed(void) {
   if (read != lastButtonRead) lastButtonChange = millis();
   bool pressed = false;
   if (millis() - lastButtonChange > BUTTON_DEBOUNCE_MS && read != buttonState) {
-    buttonState = read; pressed = buttonState == HIGH;
+    buttonState = read; pressed = (buttonState == BUTTON_PRESSED_STATE);
   }
   lastButtonRead = read;
   return pressed;

@@ -11,9 +11,22 @@
 #include "adc_bench.h"
 #include "spp_debug.h"
 
+// ============================================================================
+// CẤU HÌNH THÔNG SỐ PID VÀ TỐC ĐỘ CHO THI ĐẤU (KHÔNG DÙNG MÁY TÍNH / BLUETOOTH)
+// Khi bạn test trên web/app thấy xe chạy nhanh và mượt nhất, hãy điền bộ 4 số đó
+// vào đây rồi nạp code. Mỗi khi cắm cầu chì, xe sẽ tự lấy đúng bộ số này để chạy:
+// ============================================================================
+constexpr float    DEFAULT_KP         = 2.00f;  // Hệ số Kp (mặc định theo giao diện)
+constexpr float    DEFAULT_KI         = 0.00f;  // Hệ số Ki
+constexpr float    DEFAULT_KD         = 0.50f;  // Hệ số Kd
+constexpr int16_t  DEFAULT_BASE_SPEED = 160;    // Tốc độ cơ bản Base Speed (0 - 255)
+// ============================================================================
+
 namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
+uint32_t calibBlinkUntil=0;
+bool calibSuccess=false;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
 bool sppStarted=false, btPrevious=false, manualActive=false, ledOn=false;
 bool estopLatched=false; // Latching software E-STOP; only RESET_ESTOP can clear.
@@ -23,6 +36,50 @@ uint32_t streamPeriodUs=1000000UL/300;
 uint32_t lastTxUs=0,lastDiagUs=0,lastBlink=0,lastManual=0;
 uint32_t loopCount=0,pidCount=0,txCount=0,skippedSlots=0;
 BtTxStats lastTxStats{};
+
+struct AutoButton {
+  uint8_t pin;
+  int idleLevel;
+  int lastRaw;
+  int debouncedState;
+  uint32_t lastChangeTime;
+
+  void init(uint8_t p) {
+    pin = p;
+    pinMode(pin, INPUT);
+    int sum = 0;
+    for (int i = 0; i < 16; ++i) {
+      sum += digitalRead(pin);
+      delayMicroseconds(250);
+    }
+    idleLevel = (sum >= 8) ? HIGH : LOW;
+    lastRaw = idleLevel;
+    debouncedState = idleLevel;
+    lastChangeTime = millis();
+  }
+
+  bool isPressed() {
+    int raw = digitalRead(pin);
+    uint32_t now = millis();
+    if (raw != lastRaw) {
+      lastChangeTime = now;
+      lastRaw = raw;
+    }
+    bool trigger = false;
+    if ((now - lastChangeTime) > 30) {
+      if (raw != debouncedState) {
+        debouncedState = raw;
+        if (debouncedState != idleLevel) {
+          trigger = true;
+        }
+      }
+    }
+    return trigger;
+  }
+};
+
+AutoButton btnCalib;
+AutoButton btnStart;
 
 void ledWrite(bool on) {
   ledOn=on;
@@ -124,6 +181,13 @@ void command(const String &raw) {
   }
   if(s=="ADC_BENCH_STOP"){adcBenchCancel();reply("ADC_BENCH: STOPPED");return;}
   if(s=="ADC_BENCH_STATUS"){adcBenchStatus();return;}
+  if(s=="BTN"||s=="BUTTON"||s=="BUTTONS"){
+    char b[140];
+    snprintf(b,sizeof(b),"BTN: PIN34=%d(idle=%d) PIN35=%d(idle=%d)",
+             digitalRead(PIN_CALIB_BUTTON), btnCalib.idleLevel,
+             digitalRead(PIN_START_BUTTON), btnStart.idleLevel);
+    reply(b);return;
+  }
   if(s=="PID"){showPid();return;}
   if(s=="PWM"){
     char b[110];snprintf(b,sizeof(b),"PWM: L=%d R=%d Err=%.2f Out=%.2f",
@@ -234,8 +298,42 @@ void connectionState(uint32_t now) {
     }
     btPrevious=connected;
   }
-  if(connected){if(!ledOn)ledWrite(true);}
-  else if(now-lastBlink>=BLINK_MS){lastBlink=now;ledWrite(!ledOn);}
+  // 1. Nếu có kết nối Bluetooth: LED luôn sáng đứng yên (Solid ON)
+  if(connected){if(!ledOn)ledWrite(true);return;}
+
+  // 2. Nếu KHÔNG kết nối Bluetooth (chế độ thi đấu độc lập):
+  // 2.1. Đang chạy dò line: LED sáng liên tục
+  if(pid_is_auto_mode()){if(!ledOn)ledWrite(true);return;}
+
+  // 2.2. Đang đo lấy mẫu calib (0.1 giây): LED sáng liên tục
+  if(sensor_is_calibrating()){if(!ledOn)ledWrite(true);return;}
+
+  // 2.3. Hiệu ứng nháy báo vừa Calib xong
+  if(now < calibBlinkUntil){
+    if(calibSuccess){
+      uint32_t phase = (now % 200);
+      ledWrite(phase < 100);
+    } else {
+      uint32_t phase = (now % 100);
+      ledWrite(phase < 50);
+    }
+    return;
+  }
+
+  // 2.4. Đã lấy Trắng xong, đang chờ đặt nền Đen: Chớp kép (Double-blink)
+  if(sensor_calibration_state() == CAL_WHITE_READY){
+    uint32_t phase = (now % 700);
+    bool on = (phase < 120) || (phase >= 240 && phase < 360);
+    ledWrite(on);
+    return;
+  }
+
+  // 2.5. Trạng thái chờ: đã có Calib trong Flash thì nháy chậm (800ms), chưa có thì nháy 350ms
+  uint32_t blinkPeriod = calibrationReady ? 800 : 350;
+  if(now - lastBlink >= blinkPeriod){
+    lastBlink = now;
+    ledWrite(!ledOn);
+  }
 }
 void sendFrame(){
   if(!sppStarted||!btConnected())return;
@@ -253,14 +351,18 @@ void sendFrame(){
   t.mode=pid_is_auto_mode()?1:0;
   if(btSendTelemetry(t))++txCount;
 }
+
 } // namespace
 
 void setup() {
   // USB Serial disabled. Debug/commands exclusively via Bluetooth SPP.
   pinMode(PIN_DEBUG_LED,OUTPUT);ledWrite(false);
+  btnCalib.init(PIN_CALIB_BUTTON);
+  btnStart.init(PIN_START_BUTTON);
   sensor_init();motor_init();
   encoder_init(); // mainv2 signed quadrature x4 on A and B channels
-  pid_init(2.0f,0.0f,0.0f,100); // conservative baseline while validating sharp-turn behavior
+  pid_init(DEFAULT_KP, DEFAULT_KI, DEFAULT_KD, DEFAULT_BASE_SPEED);
+  manualSpeed = (uint8_t)DEFAULT_BASE_SPEED;
   sppStarted=btBegin("LineRobot");
   lastTxUs=lastDiagUs=micros();
   lastTxStats=btGetTxStats();
@@ -274,9 +376,19 @@ void loop() {
   connectionState(now);
   if(sppStarted)btPollCommands(command);
   perfRecord(PERF_COMM, micros()-stageStartUs);
-  if(!adcBenchActive() && sensor_is_button_pressed() && !sensor_is_calibrating()){
-    safeStop();
-    sensor_handle_calibration_step(); // press 1: WHITE, press 2: BLACK
+  if(!adcBenchActive() && !sensor_is_calibrating()){
+    if(btnCalib.isPressed()){
+      reply("[BTN] NÚT CALIB (CHÂN 34) ĐÃ BẤM!");
+      safeStop();
+      sensor_handle_calibration_step(); // Lần 1: Trắng, Lần 2: Đen
+    } else if(btnStart.isPressed()){
+      reply("[BTN] NÚT START (CHÂN 35) ĐÃ BẤM!");
+      if(pid_is_auto_mode()){
+        command("STOP");
+      } else {
+        command("START");
+      }
+    }
   }
   const bool wasCalibrating=sensor_is_calibrating();
   stageStartUs=micros();
@@ -292,8 +404,12 @@ void loop() {
     case CAL_WHITE_STARTED: reply("CAL_WHITE_STARTED"); break;
     case CAL_WHITE_DONE:    reply("CAL_WHITE_DONE"); break;
     case CAL_BLACK_STARTED: reply("CAL_BLACK_STARTED"); break;
-    case CAL_SAVED:         reply("CAL_OK_SAVED");showCalib(); break;
-    case CAL_ERROR:         reply("CAL_FAILED");showCalib(); break;
+    case CAL_SAVED:
+      calibSuccess = true; calibBlinkUntil = now + 1200;
+      reply("CAL_OK_SAVED");showCalib(); break;
+    case CAL_ERROR:
+      calibSuccess = false; calibBlinkUntil = now + 1500;
+      reply("CAL_FAILED");showCalib(); break;
     default: break;
   }
   if(pid_is_auto_mode()&&!sensor_is_calibrating()){
