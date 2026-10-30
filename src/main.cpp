@@ -18,8 +18,8 @@ namespace {
 // 300 Hz * 72 B = 21.6 kB/s. USB debug fully disabled.
 constexpr uint32_t BLINK_MS=400;
 constexpr uint32_t MANUAL_TIMEOUT_MS=750; // prevents uncontrolled manual driving
-constexpr float DEFAULT_KP=2.0f, DEFAULT_KI=0.0f, DEFAULT_KD=0.0f;
-constexpr int16_t DEFAULT_BASE_SPEED=100;
+constexpr float DEFAULT_KP=3.5f, DEFAULT_KI=0.0f, DEFAULT_KD=0.08f;
+constexpr int16_t DEFAULT_BASE_SPEED=200;
 constexpr uint32_t PID_PROFILE_MAGIC=0x50494431UL; // "PID1"
 constexpr uint16_t PID_PROFILE_VERSION=1;
 struct PidProfile {
@@ -60,7 +60,7 @@ bool validPidProfile(const PidProfile &p) {
     p.size==sizeof(PidProfile) && isfinite(p.kp) && isfinite(p.ki) &&
     isfinite(p.kd) && p.kp>=0.0f && p.kp<=50.0f &&
     p.ki>=0.0f && p.ki<=50.0f && p.kd>=0.0f && p.kd<=50.0f &&
-    p.baseSpeed>=0 && p.baseSpeed<=255 && p.reserved==0 &&
+    p.baseSpeed>0 && p.baseSpeed<=255 && p.reserved==0 &&
     p.crc==pidProfileCrc(reinterpret_cast<const uint8_t *>(&p),
                          offsetof(PidProfile,crc));
 }
@@ -114,6 +114,7 @@ const char *startAuto() {
   if(!sensor_adc_ready())return "ADC_NOT_READY";
   if(sensor_is_calibrating()||!calibrationReady||
      sensor_is_waiting_for_black())return "CALIB_REQUIRED_OR_PENDING";
+  if(pid_get_base_speed()<=0)return "BASE_PWM_MUST_BE_POSITIVE";
   manualActive=false;
   pid_set_auto_mode(true);
   return nullptr;
@@ -217,6 +218,7 @@ void command(const String &raw) {
   if(s=="PID"){showPid();return;}
   if(s=="PID_SAVE"){
     if(pid_is_auto_mode()||manualActive){reply("ERR: PID_SAVE_REQUIRES_MOTORS_STOPPED");return;}
+    if(pid_get_base_speed()<=0){reply("ERR: BASE_PWM_MUST_BE_POSITIVE");return;}
     if(!savePidProfile()){reply("ERR: PID_SAVE_FAILED");return;}
     pidProfilePersistent=true;
     reply("PID_PROFILE: SAVED_TO_NVS");showPid();return;

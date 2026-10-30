@@ -125,7 +125,7 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 ### 3.2.2. Chạy độc lập Bluetooth và lưu cấu hình PID
 - Bluetooth Classic SPP là tùy chọn. `loop()` luôn quét ADC và chạy PID khi AUTO được bật vật lý, bất kể `btBegin()` thành công hoặc đang có client SPP hay không.
 - Khi SPP mất kết nối, firmware chỉ dừng chuyển động manual đang điều khiển qua Bluetooth (`manualActive`). AUTO vật lý không bị dừng; E-STOP, ADC fault và các điều kiện an toàn khác vẫn có hiệu lực.
-- Calibration cảm biến nằm độc lập trong NVS namespace `line16cal`. Cấu hình PID nằm trong namespace `line16pid`, key `config`, có magic/version/size/CRC và kiểm tra Kp/Ki/Kd trong 0–50, Base PWM trong 0–255. Boot khôi phục profile hợp lệ; nếu không có profile hợp lệ thì dùng mặc định hiện hành `Kp=2.0, Ki=0.0, Kd=0.0, Base=100`.
+- Calibration cảm biến nằm độc lập trong NVS namespace `line16cal`. Cấu hình PID nằm trong namespace `line16pid`, key `config`, có magic/version/size/CRC và kiểm tra Kp/Ki/Kd trong 0–50, Base PWM trong 1–255. Boot khôi phục profile hợp lệ; nếu không có profile hợp lệ thì dùng mặc định `Kp=3.5, Ki=0.0, Kd=0.08, Base=200`. Profile NVS hợp lệ đã lưu tiếp tục được ưu tiên hơn giá trị mặc định.
 - Thay đổi PID qua `KP:`, `KI:`, `KD:` hoặc `BASE:` chỉ cập nhật RAM. Gửi `PID_SAVE` khi motor đã dừng để ghi NVS một lần có chủ đích; không ghi NVS trong vòng PID. `maxSpeed=255` là giới hạn firmware không có API tuning nên không nằm trong profile người dùng.
 
 ### 3.3. Phân hệ Động cơ & Driver LEDC PWM ([motor.cpp](file:///d:/CAR_CHALLENGE_2026/doline17s/src/motor.cpp) & [motor.h](file:///d:/CAR_CHALLENGE_2026/doline17s/include/motor.h))
@@ -193,7 +193,7 @@ Tất cả chân cắm được khai báo tập trung tại [include/pinout.h](f
 | **Case 7** | `LINE_CASE_T_RIGHT` | Phân loại rẽ ngã 3 phải | Cơ chế rẽ phải |
 | **Case 8** | `LINE_CASE_STOPPED` | Đang tắt AUTO, hoặc chốt đích khi cả 16 mắt đen liên tục $\ge 50$ ms | Dừng cả hai động cơ (`PWM = 0`); vạch ngang có 11–15 mắt đen chỉ chạy qua |
 | **Case 9** | `LINE_CASE_DASHED_LINE` | Mất vạch đen $< 40$ ms | Duy trì quán tính góc lái cũ (coast với $70\%$ lực bẻ lái trước đó) |
-| **Case 10** | `LINE_CASE_STARTUP_COAST`| Mất line trong 5 giây đầu sau khi bật AUTO | Chạy thẳng với PWM tối đa $65$ để tìm lại line |
+| **Case 10** | `LINE_CASE_STARTUP_COAST`| Chưa thấy line khi vừa bật AUTO hoặc mất line trong thời gian grace | Chạy thẳng tìm line tối đa 5 giây; lúc khởi động dùng PWM tối đa $100$, sau khi đã bắt line dùng PWM tối đa $65$ |
 
 - **Cơ chế Pivot Search khi mất line sau cua:**
   - Nếu mất vạch quá $40$ ms sau khi vừa vào cua: Xe quay tại chỗ (Pivot) với $PWM = \pm 85$ (tạo chênh lệch $170$ PWM giữa 2 bánh) về hướng cuối cùng nhìn thấy line.

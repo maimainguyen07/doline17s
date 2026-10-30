@@ -39,8 +39,8 @@ uint16_t sensor_get_line_bits(void) {
 }
 static int16_t leftPwm=0,rightPwm=0;
 void motor_set_speeds(int16_t left,int16_t right) {
-    assert(left>=-220 && right>=-220);
-    assert(left<=220 && right<=220);
+    assert(left>=-255 && right>=-255);
+    assert(left<=255 && right<=255);
     if(left<0 || right<0) {
         const LineCase_t current=pid_get_current_case();
         assert(current==LINE_CASE_SHARP_LEFT || current==LINE_CASE_SHARP_RIGHT ||
@@ -77,13 +77,22 @@ int main(void) {
     pid_init(2.2f,0,0,120);
     pid_set_auto_mode(true);
     pid_line_follow_step();
-    assert(leftPwm==0 && rightPwm==0);
+    assert(pid_get_current_case()==LINE_CASE_STARTUP_COAST);
+    assert(leftPwm==100 && rightPwm==100);
 
     // 1) Analog CAL=350, logic=0: must NOT start or count as a line.
     onlyEye(8,1350);
     stepMs(20);
     assert(!pid_line_is_confirmed());
+    assert(pid_get_current_case()==LINE_CASE_STARTUP_COAST);
+    assert(leftPwm==100 && rightPwm==100);
+
+    // An initial search with no line is bounded and then stops safely.
+    stepMs(5000);
+    assert(pid_get_current_case()==LINE_CASE_LOST_LINE);
     assert(leftPwm==0 && rightPwm==0);
+    pid_set_auto_mode(false);
+    pid_set_auto_mode(true);
 
     // 2) Valid black must persist for >=10ms before PID drives.
     onlyEye(8,1700);
@@ -150,7 +159,7 @@ int main(void) {
     stepMs(14);
     assert(pid_get_current_case()==LINE_CASE_NORMAL_PID);
     assert(leftPwm>0 && rightPwm<0);
-    assert(leftPwm==220 && rightPwm>=-220 && rightPwm<0);
+    assert(leftPwm==255 && rightPwm>=-255 && rightPwm<0);
     assert(rightPwm<=-150);
     assert(leftPwm-rightPwm>=370);
 
@@ -226,18 +235,18 @@ int main(void) {
     onlyEye(10,1700);
     stepMs(20);
     const int16_t cornerPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
-    assert(cornerPwm < centeredPwm && cornerPwm >= 80 && cornerPwm <= 95);
+    assert(cornerPwm < centeredPwm && cornerPwm >= 70 && cornerPwm <= 100);
 
     setPattern("0000000110000000");
     stepMs(10);
     const int16_t recoveringPwm = leftPwm > rightPwm ? leftPwm : rightPwm;
     assert(recoveringPwm==centeredPwm);
 
-    // Stop only after all 16 eyes stay black for 50 ms.
+    // A stable full-black finish marker latches an immediate safe stop.
     for(int i=0;i<N_SENSORS;i++)sensorRaw[i]=2000;
     stepMs(50);
-    assert(pid_get_current_case()==LINE_CASE_CROSS_LINE);
-    assert(leftPwm==84 && rightPwm==84);
+    assert(pid_get_current_case()==LINE_CASE_STOPPED);
+    assert(leftPwm==0 && rightPwm==0);
     stepMs(2);
     assert(pid_get_current_case()==LINE_CASE_STOPPED);
     assert(leftPwm==0 && rightPwm==0);

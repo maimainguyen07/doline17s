@@ -12,7 +12,7 @@ static const float SENSOR_WEIGHTS[N_SENSORS] = {
 
 // Optimised tune for sharp-turn responsiveness.  Gains are still live-tuneable
 // via the SPP KP:/KI:/KD: commands.
-static PID_Config_t pidConfig = {3.8f, 0.015f, 2.0f, 100, 255, -100};
+static PID_Config_t pidConfig = {3.5f, 0.0f, 0.08f, 200, 255, -100};
 static bool autoMode = false;
 static LineCase_t currentCase = LINE_CASE_STOPPED;
 static float lastError = 0, integralError = 0, lastCorrection = 0;
@@ -28,6 +28,7 @@ constexpr uint32_t LINE_LOSS_MS = 40;           // was 25 — longer coast befor
 constexpr uint32_t LINE_SEARCH_TIMEOUT_MS = 2000;
 constexpr uint32_t STARTUP_LOSS_GRACE_MS = 5000;
 constexpr int16_t DROPOUT_FORWARD_PWM = 65;
+constexpr int16_t STARTUP_SEARCH_PWM = 100;
 constexpr int16_t LINE_SEARCH_PWM = 85;
 constexpr uint8_t SEARCH_REACQUIRE_FRAMES = 3;
 constexpr uint8_t REACQUIRE_DERIVATIVE_HOLD_FRAMES = 4;
@@ -225,7 +226,8 @@ void pid_set_auto_mode(bool enabled) {
     clearPidState();
     lastComputeTimeUs = micros();
     autoStartedMs = millis();
-    motor_stop(); // Never start blind; wait for stable black-line detection.
+    startupLossActive = enabled;
+    motor_stop(); // PID performs a bounded slow search if no line is seen yet.
 }
 bool pid_is_auto_mode(void) { return autoMode; }
 
@@ -555,8 +557,10 @@ void pid_line_follow_step(void) {
         motor_set_speeds(clampPwmSigned(leftCommand),
                          clampPwmSigned(rightCommand));
     } else if (currentCase == LINE_CASE_STARTUP_COAST) {
-        const int16_t speed = pidConfig.baseSpeed < DROPOUT_FORWARD_PWM
-            ? pidConfig.baseSpeed : DROPOUT_FORWARD_PWM;
+        const int16_t searchLimit = previouslyLocked
+            ? DROPOUT_FORWARD_PWM : STARTUP_SEARCH_PWM;
+        const int16_t speed = pidConfig.baseSpeed < searchLimit
+            ? pidConfig.baseSpeed : searchLimit;
         motor_set_speeds(speed, speed);
     } else {
         clearPidState();

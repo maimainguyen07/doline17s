@@ -25,7 +25,9 @@ behavior, and the three nonblocking 200 ms LED flashes including restart policy.
 
 Test coverage:
 - Raw calibration threshold TH_i=1400 is respected, CAL=350 is not a black line.
-- No startup movement without 10 ms stable black detection.
+- On START with no visible line, a bounded PWM 100 forward search runs for up to
+  five seconds; a stable black detection transfers control to PID, otherwise
+  the robot stops at timeout.
 - If an already acquired line is lost during the first five seconds of AUTO,
   drive straight at no more than PWM 65 until the line returns or the grace
   window expires; an initial start with no line remains stopped.
